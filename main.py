@@ -11,21 +11,20 @@ from datetime import datetime
 
 # ================= AYARLAR =================
 
-# Model
 SECILEN_MODEL = "models/gemini-3-flash-preview"
 
 # Limit Ayarları
-HER_MESAJDAKI_MAIL_SAYISI = 5   # Her raporda kaç mail analiz edilecek
-DAKIKALIK_ISTEK_LIMITI = 5      # API'nin dakikalık limiti
-BEKLEME_SURESI_SANIYE = 305     # Limit dolunca kaç saniye beklenecek (5 dk + 5 sn güvenlik payı)
+HER_MESAJDAKI_MAIL_SAYISI = 5
+DAKIKALIK_ISTEK_LIMITI = 5
+BEKLEME_SURESI_SANIYE = 305
 
-# Filtreler (Bunlar AI'ya gönderilmez)
+# Filtreler
 YASAKLI_KELIMELER = [
     "Yapı Kredi", "Garanti", "İş Bankası", "Akbank", "Midas", "Google Flights"
 ]
 HARIC_TUTULACAK_MAIL = "berkucmaz20@gmail.com"
 
-# Prompt
+# YENİ PROMPT (SENİN İSTEDİĞİN SADE FORMAT)
 PROMPT_KURALLARI = """
 GÖREV:
 Aşağıdaki 5 adet e-postayı "Finansal Analist" gözüyle incele.
@@ -34,21 +33,29 @@ Aşağıdaki 5 adet e-postayı "Finansal Analist" gözüyle incele.
 - ABD borsaları, finans, makroekonomi, teknoloji ve büyüme şirketleri.
 - Substack ve Seeking Alpha kaynaklı mailler.
 
-FORMAT (HER E-POSTA İÇİN):
+FORMAT KURALLARI:
+1. Çıktı sade ve okunabilir olmalı.
+2. Gereksiz süslemeler (#, --- vb.) yapma, sadece kalın yazı (**bold**) kullan.
+3. Her e-postayı birbirinden net bir boşlukla ayır.
+
+HER E-POSTA İÇİN ŞU ŞABLONU KULLAN:
+
+[E-POSTA KONUSU]
+(Kimden: [Gönderen])
+
+1) Özet:
+E-postanın ana mesajını detaylı ama net açıkla.
+
+2) Detaylı Analiz:
+- Şirketler & Tickerlar: Bahsedilen şirketleri ve Ticker sembollerini (örn: $SPY, NVDA) kalın yaz.
+- Sektörler: Hangi sektörleri etkiliyor?
+- Riskler ve Fırsatlar: Maddeler halinde yaz.
+
+3) Yorum:
+Yatırımcı açısından ne anlama geliyor? (Uzun Vade / Kısa Vade / Spekülatif).
+
 ---
-### [E-POSTA KONUSU]
-**(Kimden: [Gönderen])**
-
-**1) Özet:**
-Detaylı ama net özet.
-
-**2) Detaylı Analiz:**
-Şirketler (Ticker), sektörler, riskler ve fırsatlar. ABD borsası şirketlerini kalın yaz.
-
-**3) Yorum:**
-Yatırımcı için ne anlama geliyor? (Uzun/Kısa vade, Spekülatif vb.)
-
-DİL: Tamamen Türkçe, profesyonel finans dili.
+(Diğer e-postaya geç)
 """
 
 # ===========================================
@@ -74,16 +81,27 @@ def filtre_kontrol(gonderen):
         if kelime.lower() in gonderen.lower(): return False
     return True
 
+def mail_gonder(service, kime, konu, icerik):
+    try:
+        message = MIMEText(icerik)
+        message['to'] = kime
+        message['from'] = "me"
+        message['subject'] = konu
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        service.users().messages().send(userId="me", body={'raw': raw}).execute()
+        print(f"Mail gönderildi: {konu}")
+    except Exception as e:
+        print(f"Mail gönderme hatası: {e}")
+
 def mailleri_getir(service):
     print("Son 24 saatlik mailler taranıyor...")
     results = service.users().messages().list(userId='me', q='newer_than:1d', maxResults=150).execute()
     messages = results.get('messages', [])
     
     mail_listesi = []
-    
     if not messages: return []
 
-    print(f"Toplam {len(messages)} ham mail bulundu. Filtreleniyor...")
+    print(f"Ham mail sayısı: {len(messages)}. Filtreleniyor...")
     
     for msg in messages:
         try:
@@ -117,7 +135,6 @@ def mailleri_getir(service):
     return mail_listesi
 
 def ai_ile_analiz_et(mail_chunk):
-    """5'li mail grubunu AI'ya sorar"""
     prompt = f"{PROMPT_KURALLARI}\n\n=== İNCELENECEK 5 E-POSTA ===\n" + "\n\n----------------\n\n".join(mail_chunk)
     
     api_key = os.environ["GEMINI_API_KEY"]
@@ -134,69 +151,53 @@ def ai_ile_analiz_et(mail_chunk):
     except Exception as e:
         return f"HATA OLUŞTU: {e}"
 
-def raporu_gonder(service, rapor_metni, rapor_numarasi):
-    if not rapor_metni: return
-    try:
-        hedef = os.environ["HEDEF_MAIL"]
-        tarih = datetime.now().strftime('%d.%m.%Y')
-        konu = f"Günlük Mail Özeti - {rapor_numarasi} ({tarih})"
-        
-        message = MIMEText(rapor_metni)
-        message['to'] = hedef
-        message['from'] = "me"
-        message['subject'] = konu
-        
-        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        service.users().messages().send(userId="me", body={'raw': raw}).execute()
-        print(f"Rapor {rapor_numarasi} gönderildi.")
-    except Exception as e:
-        print(f"Mail gönderme hatası: {e}")
-
 def listeyi_bol(liste, parca_boyutu):
-    """Listeyi 5'erli parçalara böler"""
     for i in range(0, len(liste), parca_boyutu):
         yield liste[i:i + parca_boyutu]
 
 if __name__ == '__main__':
     service = giris_yap()
+    hedef_mail = os.environ["HEDEF_MAIL"]
+    
     if service:
         tum_mailler = mailleri_getir(service)
         toplam_mail = len(tum_mailler)
         
         if toplam_mail > 0:
-            print(f"Filtreleme sonrası {toplam_mail} mail kaldı. İşlem başlıyor...")
+            # --- 1. BİLGİLENDİRME MAİLİ ---
+            tarih = datetime.now().strftime('%d.%m.%Y')
+            paket_sayisi = math.ceil(toplam_mail / HER_MESAJDAKI_MAIL_SAYISI)
             
-            # Listeyi 5'erli paketlere böl
+            bilgi_mesaji = (
+                f"Merhaba,\n\n"
+                f"Bugün analiz edilecek toplam **{toplam_mail}** adet önemli mail bulundu.\n"
+                f"Bu mailler **{paket_sayisi}** parça halinde (Rapor 1, Rapor 2...) birazdan gönderilmeye başlanacak.\n\n"
+                f"İyi okumalar."
+            )
+            mail_gonder(service, hedef_mail, f"Analiz Başlıyor ({tarih})", bilgi_mesaji)
+            
+            # --- 2. ANALİZ SÜRECİ ---
             mail_paketleri = list(listeyi_bol(tum_mailler, HER_MESAJDAKI_MAIL_SAYISI))
-            toplam_paket = len(mail_paketleri)
-            
-            print(f"Toplam {toplam_paket} adet rapor oluşturulacak.")
-            
             anlik_istek_sayisi = 0
             
             for index, paket in enumerate(mail_paketleri, 1):
-                print(f"--- Paket {index}/{toplam_paket} işleniyor ---")
-                
-                # 1. Analiz Et
+                print(f"Paket {index} işleniyor...")
                 analiz_sonucu = ai_ile_analiz_et(paket)
                 
-                # 2. Mail Gönder
-                raporu_gonder(service, analiz_sonucu, index)
+                # Mail başlığı: Günlük Mail Özeti - 1 / 5
+                konu_basligi = f"Günlük Mail Özeti - {index} / {paket_sayisi}"
+                mail_gonder(service, hedef_mail, konu_basligi, analiz_sonucu)
                 
-                # 3. Sayaçları Güncelle
                 anlik_istek_sayisi += 1
                 
-                # 4. Limit Kontrolü (Son paket değilse kontrol et)
-                if index < toplam_paket:
+                if index < len(mail_paketleri):
                     if anlik_istek_sayisi >= DAKIKALIK_ISTEK_LIMITI:
-                        print(f"⚠️ Limit (Dakikada 5 istek) doldu. {BEKLEME_SURESI_SANIYE} saniye bekleniyor...")
+                        print(f"Limit doldu. {BEKLEME_SURESI_SANIYE} saniye bekleniyor...")
                         time.sleep(BEKLEME_SURESI_SANIYE)
-                        anlik_istek_sayisi = 0 # Sayacı sıfırla ve devam et
-                        print("✅ Bekleme bitti, devam ediliyor...")
+                        anlik_istek_sayisi = 0
                     else:
-                        # Paketler arası kısa bir nefes alma (2 saniye) - Opsiyonel güvenlik
-                        time.sleep(2)
+                        time.sleep(2) # Güvenlik payı
             
-            print("TÜM İŞLEMLER TAMAMLANDI.")
+            print("TÜM İŞLEMLER BİTTİ.")
         else:
-            print("Analiz edilecek mail bulunamadı.")
+            print("Analiz edilecek mail yok.")
