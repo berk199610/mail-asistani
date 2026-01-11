@@ -1,0 +1,33 @@
+name: Günlük Mail Asistanı
+
+on:
+  schedule:
+    # Her gün sabah 09:00 (Türkiye saati) için UTC 06:00
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Manuel çalıştırmak için buton
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Depoyu Çek
+      uses: actions/checkout@v3
+
+    - name: Python Kur
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Kütüphaneleri Yükle
+      run: |
+        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+    - name: Çalıştır
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+        GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+        GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+        HEDEF_MAIL: ${{ secrets.HEDEF_MAIL }}
+      run: python main.py
