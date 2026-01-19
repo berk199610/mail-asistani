@@ -2,6 +2,7 @@ import os
 import base64
 import json
 import urllib.request
+import urllib.error
 import time
 import math
 import re
@@ -18,22 +19,22 @@ from datetime import datetime
 
 # ================= AYARLAR =================
 
-SECILEN_MODEL = "models/gemini-2.0-flash-exp" 
-# Hata alırsan: "models/gemini-1.5-flash" yapabilirsin.
+# SENİN İSTEDİĞİN MODEL:
+SECILEN_MODEL = "models/gemini-2.5-flash"
+# Eğer hata alırsan "models/gemini-2.5-flash-lite" yapabilirsin.
 
-# Limit Ayarları
-HER_MESAJDAKI_MAIL_SAYISI = 5
-DAKIKALIK_ISTEK_LIMITI = 5
-BEKLEME_SURESI_SANIYE = 305
+# Limit Ayarları (Senin hesabındaki 5 RPM limitine göre ayarlandı)
+HER_MESAJDAKI_MAIL_SAYISI = 10  # Tek seferde çok mail işleyelim ki istek sayısı azalsın
+BEKLEME_SURESI_SANIYE = 30      # Her analizden sonra 30 saniye mola (Limit aşımını engeller)
 
 # Filtreler
 YASAKLI_KELIMELER = [
     "Yapı Kredi", "Garanti", "İş Bankası", "Akbank", "Midas", "Google Flights", 
-    "Unsubscribe", "Üyelikten ayrıl", "View in browser"
+    "Unsubscribe", "Üyelikten ayrıl", "View in browser", "Tarayıcıda görüntüle"
 ]
 HARIC_TUTULACAK_MAIL = "berkucmaz20@gmail.com"
 
-# PROMPT (HTML Çıktı İçin Optimize Edildi)
+# PROMPT
 PROMPT_KURALLARI = """
 GÖREV:
 Aşağıdaki e-postaları "Kıdemli Finansal Analist" gözüyle incele.
@@ -84,7 +85,6 @@ def giris_yap():
         return None
 
 def html_temizle(html_content):
-    """HTML içeriğini temizleyip sadece metni alır."""
     try:
         soup = BeautifulSoup(html_content, 'html.parser')
         for script in soup(["script", "style", "head", "title", "meta", "footer"]):
@@ -93,7 +93,7 @@ def html_temizle(html_content):
         lines = (line.strip() for line in text.splitlines())
         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
         text = '\n'.join(chunk for chunk in chunks if chunk)
-        return text[:10000] 
+        return text[:15000] # 2.5 Flash'ın kapasitesi yüksek, daha çok metin gönderiyoruz
     except:
         return html_content[:5000]
 
@@ -104,7 +104,6 @@ def filtre_kontrol(gonderen):
     return True
 
 def piyasa_verisi_getir(metin):
-    """Metin içindeki $TICKER sembollerini bulup fiyatlarını getirir."""
     tickers = set(re.findall(r'\$([A-Z]{2,5})', metin))
     if not tickers:
         return ""
@@ -138,7 +137,6 @@ def mail_gonder(service, kime, konu, icerik_html, ek_dosya_yolu=None):
         msg['To'] = kime
         msg['From'] = "me"
         msg['Subject'] = konu
-
         msg.attach(MIMEText(icerik_html, 'html'))
 
         if ek_dosya_yolu and os.path.exists(ek_dosya_yolu):
@@ -195,29 +193,19 @@ def mailleri_getir(service):
                     body = base64.urlsafe_b64decode(data).decode()
             
             if not body: body = txt.get('snippet', '')
+            if "<" in body and ">" in body: temiz_body = html_temizle(body)
+            else: temiz_body = body
             
-            if "<" in body and ">" in body: 
-                temiz_body = html_temizle(body)
-            else:
-                temiz_body = body
-            
-            final_text = temiz_body.replace("\r", "").replace("\n", " ")[:8000]
+            final_text = temiz_body.replace("\r", "").replace("\n", " ")[:15000]
             
             mail_listesi.append(f"GÖNDEREN: {sender}\nKONU: {subject}\nİÇERİK: {final_text}")
-            
-            ham_veri.append({
-                "Tarih": datetime.now().strftime('%Y-%m-%d'),
-                "Gonderen": sender,
-                "Konu": subject,
-                "Icerik_Ozet": final_text[:200]
-            })
-            
+            ham_veri.append({"Tarih": datetime.now().strftime('%Y-%m-%d'), "Gonderen": sender, "Konu": subject, "Icerik_Ozet": final_text[:200]})
         except Exception as e:
-            print(f"Mail okuma hatası: {e}")
             continue
             
     return mail_listesi, ham_veri
 
+# --- AI FONKSİYONU (Retry Mekanizmalı) ---
 def ai_ile_analiz_et(mail_chunk):
     prompt = f"{PROMPT_KURALLARI}\n\n=== İNCELENECEK E-POSTALAR ===\n" + "\n\n----------------\n\n".join(mail_chunk)
     
@@ -227,13 +215,29 @@ def ai_ile_analiz_et(mail_chunk):
     headers = {'Content-Type': 'application/json'}
     data = { "contents": [{"parts": [{"text": prompt}]}] }
     
-    try:
-        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
-        with urllib.request.urlopen(req) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return result['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e:
-        return f"<p style='color:red'>AI Analiz Hatası: {e}</p>"
+    max_tekrar = 5  # Pes etmek yok, 5 kere deneyecek
+    bekleme = 45    # Bekleme süresi
+
+    for deneme in range(max_tekrar):
+        try:
+            req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+            with urllib.request.urlopen(req) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                return result['candidates'][0]['content']['parts'][0]['text']
+        
+        except urllib.error.HTTPError as e:
+            if e.code == 429: # Limit hatası
+                print(f"⚠️ Hız Limiti Aşıldı (429). {bekleme} saniye bekleniyor... (Deneme {deneme+1}/{max_tekrar})")
+                time.sleep(bekleme)
+                bekleme += 20 
+            elif e.code == 404: # Model bulunamadı hatası (Eğer 2.5 henüz açılmadıysa)
+                 return f"<p style='color:red'>HATA: Seçilen model ({clean_name}) API'de bulunamadı. Lütfen '2.5-flash-lite' deneyin.</p>"
+            else:
+                return f"<p style='color:red'>AI Analiz Hatası: {e}</p>"
+        except Exception as e:
+            return f"<p style='color:red'>Beklenmeyen Hata: {e}</p>"
+            
+    return "<p style='color:red'>Üzgünüm, Google limitleri çok zorladı. Bu kısım atlandı.</p>"
 
 def listeyi_bol(liste, parca_boyutu):
     for i in range(0, len(liste), parca_boyutu):
@@ -249,41 +253,29 @@ if __name__ == '__main__':
         toplam_mail = len(tum_mailler)
         
         if toplam_mail > 0:
-            # --- 1. CSV ARŞİV OLUŞTURMA ---
             csv_dosya_adi = f"gunluk_arsiv_{datetime.now().strftime('%Y%m%d')}.csv"
             try:
-                df = pd.DataFrame(arsiv_verisi)
-                df.to_csv(csv_dosya_adi, index=False)
-                print("CSV Arşivi oluşturuldu.")
+                pd.DataFrame(arsiv_verisi).to_csv(csv_dosya_adi, index=False)
             except:
                 csv_dosya_adi = None
 
-            # --- 2. BİLGİLENDİRME MAİLİ ---
-            tarih = datetime.now().strftime('%d.%m.%Y')
             paket_sayisi = math.ceil(toplam_mail / HER_MESAJDAKI_MAIL_SAYISI)
             
             bilgi_mesaji = (
-                f"<h3>🚀 Mail Asistanı V2.0 Devrede</h3>"
+                f"<h3>🚀 Mail Asistanı V2.5</h3>"
                 f"<p>Bugün analiz edilecek toplam <b>{toplam_mail}</b> adet önemli mail bulundu.</p>"
-                f"<p>Bu mailler <b>{paket_sayisi}</b> parça halinde analiz edilip gönderilecek.</p>"
-                f"<p><i>Sistem: HTML Temizliği ✅ | Canlı Borsa Verisi ✅ | CSV Arşivi ✅</i></p>"
+                f"<p><i>Model: Gemini 2.5 Flash ⚡ (Bekleme süreleri optimize edildi)</i></p>"
             )
-            mail_gonder(service, hedef_mail, f"Analiz Başlıyor ({tarih})", bilgi_mesaji)
+            mail_gonder(service, hedef_mail, f"Analiz Başlıyor ({datetime.now().strftime('%d.%m.%Y')})", bilgi_mesaji)
             
-            # --- 3. ANALİZ SÜRECİ ---
             mail_paketleri = list(listeyi_bol(tum_mailler, HER_MESAJDAKI_MAIL_SAYISI))
-            anlik_istek_sayisi = 0
             
             for index, paket in enumerate(mail_paketleri, 1):
                 print(f"Paket {index}/{paket_sayisi} işleniyor...")
                 
-                # AI Analizi
                 analiz_sonucu = ai_ile_analiz_et(paket)
-                
-                # yfinance ile Piyasa Verisi Ekleme
                 piyasa_html = piyasa_verisi_getir(analiz_sonucu)
                 
-                # Final HTML
                 final_icerik = f"""
                 <html>
                 <body style="font-family: Arial, sans-serif;">
@@ -295,27 +287,17 @@ if __name__ == '__main__':
                     </div>
                     {piyasa_html}
                     <hr>
-                    <p style="font-size:10px; color:#999;">Bu rapor AI tarafından oluşturulmuştur. Yatırım tavsiyesi değildir.</p>
+                    <p style="font-size:10px; color:#999;">Bu rapor Gemini 2.5 AI tarafından oluşturulmuştur.</p>
                 </body>
                 </html>
                 """
                 
-                konu_basligi = f"📊 Günlük Mail Özeti - {index} / {paket_sayisi}"
-                
-                # Sadece son mailde CSV dosyasını ekle
                 ek_dosya = csv_dosya_adi if index == len(mail_paketleri) else None
-                
-                mail_gonder(service, hedef_mail, konu_basligi, final_icerik, ek_dosya_yolu=ek_dosya)
-                
-                anlik_istek_sayisi += 1
+                mail_gonder(service, hedef_mail, f"📊 Günlük Mail Özeti - {index} / {paket_sayisi}", final_icerik, ek_dosya_yolu=ek_dosya)
                 
                 if index < len(mail_paketleri):
-                    if anlik_istek_sayisi >= DAKIKALIK_ISTEK_LIMITI:
-                        print(f"Limit doldu. {BEKLEME_SURESI_SANIYE} saniye bekleniyor...")
-                        time.sleep(BEKLEME_SURESI_SANIYE)
-                        anlik_istek_sayisi = 0
-                    else:
-                        time.sleep(5) 
+                    print(f"Limit güvenliği: {BEKLEME_SURESI_SANIYE} sn mola...")
+                    time.sleep(BEKLEME_SURESI_SANIYE)
             
             print("TÜM İŞLEMLER BİTTİ.")
         else:
