@@ -21,7 +21,8 @@ jobs:
 
     - name: Kütüphaneleri Yükle
       run: |
-        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+        python -m pip install --upgrade pip
+        pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client beautifulsoup4 yfinance pandas
 
     - name: Çalıştır
       env:
