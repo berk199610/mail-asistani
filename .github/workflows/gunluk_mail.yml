@@ -1,76 +1,33 @@
-if service:
-    tum_mailler, arsiv_verisi = mailleri_getir(service)
-    toplam_mail = len(tum_mailler)
-    
-    if toplam_mail > 0:
-        # --- 1. CSV ARŞİV OLUŞTURMA ---
-        csv_dosya_adi = f"gunluk_arsiv_{datetime.now().strftime('%Y%m%d')}.csv"
-        try:
-            df = pd.DataFrame(arsiv_verisi)
-            df.to_csv(csv_dosya_adi, index=False)
-            print("CSV Arşivi oluşturuldu.")
-        except:
-            csv_dosya_adi = None
+name: Gunluk Mail Analizi
 
-        # --- 2. BİLGİLENDİRME MAİLİ ---
-        tarih = datetime.now().strftime('%d.%m.%Y')
-        paket_sayisi = math.ceil(toplam_mail / HER_MESAJDAKI_MAIL_SAYISI)
-        
-        bilgi_mesaji = (
-            f"<h3>🚀 Mail Asistanı V2.0 Devrede</h3>"
-            f"<p>Bugün analiz edilecek toplam <b>{toplam_mail}</b> adet önemli mail bulundu.</p>"
-            f"<p>Bu mailler <b>{paket_sayisi}</b> parça halinde analiz edilip gönderilecek.</p>"
-            f"<p><i>Sistem: HTML Temizliği ✅ | Canlı Borsa Verisi ✅ | CSV Arşivi ✅</i></p>"
-        )
-        mail_gonder(service, hedef_mail, f"Analiz Başlıyor ({tarih})", bilgi_mesaji)
-        
-        # --- 3. ANALİZ SÜRECİ ---
-        mail_paketleri = list(listeyi_bol(tum_mailler, HER_MESAJDAKI_MAIL_SAYISI))
-        anlik_istek_sayisi = 0
-        
-        for index, paket in enumerate(mail_paketleri, 1):
-            print(f"Paket {index}/{paket_sayisi} işleniyor...")
-            
-            # AI Analizi
-            analiz_sonucu = ai_ile_analiz_et(paket)
-            
-            # yfinance ile Piyasa Verisi Ekleme
-            piyasa_html = piyasa_verisi_getir(analiz_sonucu)
-            
-            # Final HTML
-            final_icerik = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif;">
-                <div style="background-color:#2c3e50; color:white; padding:10px; text-align:center;">
-                    <h2>Günlük Özet Raporu ({index}/{paket_sayisi})</h2>
-                </div>
-                <div style="padding:20px;">
-                    {analiz_sonucu}
-                </div>
-                {piyasa_html}
-                <hr>
-                <p style="font-size:10px; color:#999;">Bu rapor AI tarafından oluşturulmuştur. Yatırım tavsiyesi değildir.</p>
-            </body>
-            </html>
-            """
-            
-            konu_basligi = f"📊 Günlük Mail Özeti - {index} / {paket_sayisi}"
-            
-            # Sadece son mailde CSV dosyasını ekle
-            ek_dosya = csv_dosya_adi if index == len(mail_paketleri) else None
-            
-            mail_gonder(service, hedef_mail, konu_basligi, final_icerik, ek_dosya_yolu=ek_dosya)
-            
-            anlik_istek_sayisi += 1
-            
-            if index < len(mail_paketleri):
-                if anlik_istek_sayisi >= DAKIKALIK_ISTEK_LIMITI:
-                    print(f"Limit doldu. {BEKLEME_SURESI_SANIYE} saniye bekleniyor...")
-                    time.sleep(BEKLEME_SURESI_SANIYE)
-                    anlik_istek_sayisi = 0
-                else:
-                    time.sleep(5) # Güvenlik payı
-        
-        print("TÜM İŞLEMLER BİTTİ.")
-    else:
-        print("Analiz edilecek mail yok.")"
+on:
+  schedule:
+    - cron: '30 10 * * *'  # Her gün 10:30 UTC (TSİ 13:30)
+  workflow_dispatch:      # Manuel tetikleme butonu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Depoyu Cek (Checkout)
+      uses: actions/checkout@v3
+
+    - name: Python Kurulumu
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Kutuphaneleri Yukle
+      run: |
+        python -m pip install --upgrade pip
+        pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client beautifulsoup4 yfinance pandas
+
+    - name: Scripti Calistir
+      env:
+        GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+        GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+        GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        HEDEF_MAIL: ${{ secrets.HEDEF_MAIL }}
+      run: python main.py
