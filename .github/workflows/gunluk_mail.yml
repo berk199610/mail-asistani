@@ -2,7 +2,7 @@ name: Gunluk Mail Analizi
 
 on:
   schedule:
-    - cron: '30 10 * * *'  # Her gün 10:30 UTC (TSİ 13:30)
+    - cron: '30 6 * * *'  # UTC 06:30 -> Tayland 13:30 / Türkiye 09:30
   workflow_dispatch:      # Manuel tetikleme butonu
 
 jobs:
