@@ -2,15 +2,15 @@ name: Gunluk Mail Analizi
 
 on:
   schedule:
-    - cron: '30 6 * * *'  # UTC 06:30 -> Tayland 13:30 / Türkiye 09:30
-  workflow_dispatch:      # Manuel tetikleme butonu
+    - cron: '30 6 * * *'  # Tayland 13:30 (UTC 06:30)
+  workflow_dispatch:      # Manuel Çalıştırma Butonu
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Depoyu Cek (Checkout)
+    - name: Depoyu Cek
       uses: actions/checkout@v3
 
     - name: Python Kurulumu
@@ -21,7 +21,7 @@ jobs:
     - name: Kutuphaneleri Yukle
       run: |
         python -m pip install --upgrade pip
-        pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client beautifulsoup4 yfinance pandas
+        pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client beautifulsoup4 yfinance pandas matplotlib gspread
 
     - name: Scripti Calistir
       env:
@@ -30,4 +30,5 @@ jobs:
         GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         HEDEF_MAIL: ${{ secrets.HEDEF_MAIL }}
+        SHEET_ID: ${{ secrets.SHEET_ID }}
       run: python main.py
