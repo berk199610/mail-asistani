@@ -2,8 +2,8 @@ name: Gunluk Mail Analizi
 
 on:
   schedule:
-    - cron: '30 6 * * *'  # Tayland 13:30 (UTC 06:30)
-  workflow_dispatch:      # Manuel Çalıştırma Butonu
+    - cron: '30 6 * * *'  # Vietnam saatiyle 13:30 (UTC 06:30)
+  workflow_dispatch:      # Manuel çalıştırma butonu
 
 jobs:
   build:
@@ -11,17 +11,19 @@ jobs:
 
     steps:
     - name: Depoyu Cek
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Python Kurulumu
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.11'
 
     - name: Kutuphaneleri Yukle
       run: |
         python -m pip install --upgrade pip
-        pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client beautifulsoup4 yfinance pandas matplotlib gspread
+        pip install google-auth google-auth-oauthlib google-auth-httplib2 \
+                    google-api-python-client beautifulsoup4 yfinance \
+                    pandas matplotlib gspread
 
     - name: Scripti Calistir
       env:
@@ -31,4 +33,19 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         HEDEF_MAIL: ${{ secrets.HEDEF_MAIL }}
         SHEET_ID: ${{ secrets.SHEET_ID }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
+
+    - name: Hata Durumunda Bildirim
+      if: failure()
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            -d "text=⛔ <b>GitHub Actions Çöktü</b>%0A%0AMail asistanı workflow'u başarısız oldu. GitHub Actions sekmesinden logları kontrol et."
+        fi
