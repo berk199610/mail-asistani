@@ -3,7 +3,15 @@ name: Gunluk Mail Analizi
 on:
   schedule:
     - cron: '30 6 * * *'  # Vietnam saatiyle 13:30 (UTC 06:30)
-  workflow_dispatch:      # Manuel çalıştırma butonu
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Günlük analiz veya etiket ve kaynak düzenini uygula'
+        type: choice
+        default: analyze
+        options:
+          - analyze
+          - labels
 
 concurrency:
   group: gunluk-mail-analizi
@@ -63,6 +71,7 @@ jobs:
 
     - name: Scripti Calistir
       env:
+        MAIL_MODE: ${{ inputs.mode || 'analyze' }}
         GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
         GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
         GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}

@@ -37,7 +37,7 @@ MODEL_ZINCIRI = [
 
 # --- WATCHLIST ---
 # Berk'in core pozisyonları. Bu hisselerden biri haberde geçtiğinde otomatik
-# "⭐ Portfolio" etiketi alır ve raporda özel vurgulanır.
+# Ana konusu bu hisseler olan yazılar "Portföyüm" etiketi alır.
 # Yeni hisse eklemek için: aşağıdaki listeye string olarak ekle (büyük harf, $ olmadan).
 WATCHLIST = [
     # AI Donanım
@@ -61,7 +61,7 @@ BEKLEME_SURESI_SANIYE = 10
 MAX_RETRY = 5
 ILK_BEKLEME = 20
 
-ACIL_UYARI_ESIK = 7
+ACIL_UYARI_ESIK = 9
 
 YASAKLI_KELIMELER = [
     "Yapı Kredi", "Garanti", "İş Bankası", "Akbank", "Midas", "Google Flights",
@@ -74,27 +74,54 @@ GMAIL_QUERY = 'newer_than:1d -category:promotions -category:social -in:spam'
 # ================= ETİKET TANIMLARI =================
 
 KONU_ETIKETLERI = {
-    "01-AI-Altyapi":     {"ad": "Berkonomi/01-AI-Altyapı"},
-    "02-AI-Donanim":     {"ad": "Berkonomi/02-AI-Donanım"},
-    "03-AI-Enerji":      {"ad": "Berkonomi/03-AI-Enerji"},
-    "04-Savunma-Uzay":   {"ad": "Berkonomi/04-Savunma-Uzay"},
-    "05-Makro-Diger":    {"ad": "Berkonomi/05-Makro-Diğer"},
-    "06-Sirket-Earnings":{"ad": "Berkonomi/06-Şirket-Earnings"},
-    "07-Genel-Piyasa":   {"ad": "Berkonomi/07-Genel-Piyasa"},
+    "01-AI-Altyapi":     {"ad": "Konu/AI altyapı", "eski": ["Berkonomi/01-AI-Altyapı"], "renk": "#16a765"},
+    "02-AI-Donanim":     {"ad": "Konu/AI donanım", "eski": ["Berkonomi/02-AI-Donanım"], "renk": "#8e63ce"},
+    "03-AI-Enerji":      {"ad": "Konu/Enerji", "eski": ["Berkonomi/03-AI-Enerji"], "renk": "#f2c960", "yazi": "#000000"},
+    "04-Savunma-Uzay":   {"ad": "Konu/Savunma ve uzay", "eski": ["Berkonomi/04-Savunma-Uzay"], "renk": "#285bac"},
+    "05-Makro-Diger":    {"ad": "Konu/Makroekonomi", "eski": ["Berkonomi/05-Makro-Diğer"], "renk": "#2da2bb"},
+    "06-Sirket-Earnings":{"ad": "Konu/Bilanço ve şirket", "eski": ["Berkonomi/06-Şirket-Earnings"], "renk": "#b65775"},
+    "07-Genel-Piyasa":   {"ad": "Konu/Genel piyasa", "eski": ["Berkonomi/07-Genel-Piyasa"], "renk": "#666666"},
 }
 
 AKSIYON_ETIKETLERI = {
-    "ANALIZ":         {"ad": "Aksiyon/✓Analiz-Edildi"},
-    "YUKSEK_ONEM":    {"ad": "Aksiyon/⭐Yüksek-Önem"},
-    "PORTFOLIO":      {"ad": "Aksiyon/⭐Portfolio"},     # YENİ - watchlist için
-    "ELE_KONUSUZ":    {"ad": "Aksiyon/⊘Konusuz"},
-    "ELE_REKLAM":     {"ad": "Aksiyon/⊘Reklam"},
-    "ELE_BANKA":      {"ad": "Aksiyon/⊘Bankacılık"},
-    "ELE_DUSUK":      {"ad": "Aksiyon/⊘Düşük-Değer"},
-    "HATA":           {"ad": "Aksiyon/✗Hata"},
+    "ANALIZ":         {"ad": "Durum/İncelendi", "eski": ["Aksiyon/✓Analiz-Edildi"], "renk": "#b9e4d0", "yazi": "#000000", "gorunum": "hide"},
+    "YUKSEK_ONEM":    {"ad": "Öncelik/Önemli gelişme", "eski": ["Aksiyon/⭐Yüksek-Önem", "Aksiyon/Yüksek-Önem"], "renk": "#cc3a21"},
+    "PORTFOLIO":      {"ad": "Öncelik/Portföyüm", "eski": ["Aksiyon/⭐Portfolio", "Aksiyon/Portfolio"], "renk": "#653e9b"},
+    "ELE_KONUSUZ":    {"ad": "Durum/İlgi alanı dışında", "eski": ["Aksiyon/⊘Konusuz"], "renk": "#efefef", "yazi": "#666666", "gorunum": "hide"},
+    "ELE_REKLAM":     {"ad": "Durum/Reklam", "eski": ["Aksiyon/⊘Reklam"], "renk": "#efefef", "yazi": "#666666", "gorunum": "hide"},
+    "ELE_BANKA":      {"ad": "Durum/Bankacılık", "eski": ["Aksiyon/⊘Bankacılık"], "renk": "#cccccc", "yazi": "#000000", "gorunum": "hide"},
+    "ELE_DUSUK":      {"ad": "Durum/Düşük öncelik", "eski": ["Aksiyon/⊘Düşük-Değer"], "renk": "#efefef", "yazi": "#666666", "gorunum": "hide"},
+    "HATA":           {"ad": "Durum/Tekrar denenecek", "eski": ["Aksiyon/✗Hata"], "renk": "#f6c5be", "yazi": "#000000"},
 }
 
+KAYNAK_ETIKETLERI = {
+    "Substack": {"ad": "01 · Substack", "renk": "#ff7537", "yazi": "#000000"},
+    "Seeking Alpha": {"ad": "02 · Seeking Alpha", "renk": "#3c78d8"},
+}
+
+
+def kaynak_tespit(headers):
+    # Publisher headers, not arbitrary links in an article or AI guesses.
+    metin = ' '.join(h.get('value', '') for h in headers
+                     if h.get('name', '').lower() in ('from', 'list-id', 'list-unsubscribe'))
+    for kaynak, domain in [('Substack', 'substack.com'), ('Seeking Alpha', 'seekingalpha.com')]:
+        if re.search(r'(?<![\w.-])(?:[\w-]+\.)*' + re.escape(domain) + r'(?=$|[^\w.-])', metin, re.I):
+            return kaynak
+    return 'Diğer'
+
+
+def kaynak_etiketle(service, message_id, kaynak):
+    if kaynak not in KAYNAK_ETIKETLERI:
+        return
+    etiket = LABEL_CACHE.get(KAYNAK_ETIKETLERI[kaynak]['ad'])
+    if not etiket:
+        raise RuntimeError('Kaynak etiketi hazırlanamadı')
+    add = [etiket] + (['STARRED'] if kaynak == 'Substack' else [])
+    service.users().messages().modify(userId='me', id=message_id,
+                                     body={'addLabelIds': add}).execute()
+
 LABEL_CACHE = {}
+MANAGED_LABEL_IDS = set()
 CALISMA_HATALARI = Counter()
 
 
@@ -179,6 +206,10 @@ SADECE JSON listesi döndür, başka hiçbir şey yazma.
 - 4-6: Orta
 - 7-10: Yüksek
 
+9-10 puanı yalnızca somut ve şirket/sektör için çok önemli yeni gelişmelere ver.
+Sıradan görüş yazısı, fiyat hedefi, liste bülteni veya başlıktaki heyecanlı dil
+tek başına yüksek önem değildir. Teyitsiz iddiaları ve yazarın tahminlerini belirt.
+
 "tum_tickerlar" alanı: Mailde geçen TÜM ticker'ları $ ile yaz, ana ticker dahil.
 ele_sebebi sadece: ELE_KONUSUZ, ELE_REKLAM, ELE_DUSUK
 """
@@ -225,27 +256,25 @@ def etiketleri_olustur_veya_getir(service):
         mevcut = service.users().labels().list(userId='me').execute().get('labels', [])
         mevcut_map = {lbl['name']: lbl['id'] for lbl in mevcut}
 
-        tum_etiketler = list(KONU_ETIKETLERI.values()) + list(AKSIYON_ETIKETLERI.values())
+        tum_etiketler = (list(KONU_ETIKETLERI.values()) + list(AKSIYON_ETIKETLERI.values())
+                        + list(KAYNAK_ETIKETLERI.values()))
 
         for etiket in tum_etiketler:
             ad = etiket['ad']
-            if ad in mevcut_map:
-                LABEL_CACHE[ad] = mevcut_map[ad]
+            aliases = [ad] + etiket.get('eski', [])
+            label_id = next((mevcut_map[n] for n in aliases if n in mevcut_map), None)
+            body = {'name': ad, 'labelListVisibility': ('labelHide' if etiket.get('gorunum') == 'hide' else 'labelShow'),
+                    'messageListVisibility': etiket.get('gorunum', 'show'),
+                    'color': {'backgroundColor': etiket['renk'],
+                              'textColor': etiket.get('yazi', '#ffffff')}}
+            if label_id:
+                yeni = service.users().labels().update(userId='me', id=label_id, body=body).execute()
             else:
-                try:
-                    yeni = service.users().labels().create(
-                        userId='me',
-                        body={
-                            "name": ad,
-                            "labelListVisibility": "labelShow",
-                            "messageListVisibility": "show"
-                        }
-                    ).execute()
-                    LABEL_CACHE[ad] = yeni['id']
-                    print(f"✓ Etiket oluşturuldu: {ad}")
-                except Exception as e:
-                    hata_kaydet("Etiket oluşturma")
-                    print(f"❌ Etiket: '{ad}': {e}")
+                yeni = service.users().labels().create(userId='me', body=body).execute()
+            LABEL_CACHE[ad] = yeni['id']
+            if etiket not in KAYNAK_ETIKETLERI.values():
+                MANAGED_LABEL_IDS.update(mevcut_map[n] for n in aliases if n in mevcut_map)
+                MANAGED_LABEL_IDS.add(yeni['id'])
 
         print(f"Toplam {len(LABEL_CACHE)} etiket hazır.")
         return True
@@ -273,7 +302,8 @@ def maile_etiket_ata(service, message_id, etiket_anahtarlari):
     try:
         service.users().messages().modify(
             userId='me', id=message_id,
-            body={"addLabelIds": label_ids}
+            body={"addLabelIds": label_ids,
+                  "removeLabelIds": sorted(MANAGED_LABEL_IDS - set(label_ids))}
         ).execute()
         return True
     except Exception as e:
@@ -362,16 +392,26 @@ def yasakli_mi(gonderen):
 def mailleri_getir(service):
     print(f"Mail sorgusu: {GMAIL_QUERY}")
     messages = []
-    page_token = None
-    while True:
-        params = dict(userId='me', q=GMAIL_QUERY, maxResults=150)
-        if page_token:
-            params['pageToken'] = page_token
-        results = service.users().messages().list(**params).execute()
-        messages.extend(results.get('messages', []))
-        page_token = results.get('nextPageToken')
-        if not page_token:
-            break
+    seen = set()
+    # Priority publishers are included even if Gmail puts them in Promotions.
+    queries = [f'newer_than:1d label:"{e["ad"]}" -in:spam -in:trash'
+               for e in KAYNAK_ETIKETLERI.values()] + [GMAIL_QUERY]
+    queries += ['newer_than:1d {from:substack.com list:substack.com} -in:spam -in:trash',
+                'newer_than:1d {from:seekingalpha.com list:seekingalpha.com} -in:spam -in:trash']
+    for query in queries:
+        page_token = None
+        while True:
+            params = dict(userId='me', q=query, maxResults=150)
+            if page_token:
+                params['pageToken'] = page_token
+            results = service.users().messages().list(**params).execute()
+            for message in results.get('messages', []):
+                if message['id'] not in seen:
+                    seen.add(message['id'])
+                    messages.append(message)
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                break
 
     analiz_listesi = []
     banka_listesi = []
@@ -385,6 +425,12 @@ def mailleri_getir(service):
         try:
             txt = service.users().messages().get(userId='me', id=msg['id']).execute()
             headers = txt['payload']['headers']
+            kaynak = kaynak_tespit(headers)
+            # Already-labelled custom-domain publisher mail is also recognised.
+            for name, label in KAYNAK_ETIKETLERI.items():
+                if LABEL_CACHE.get(label['ad']) in txt.get('labelIds', []):
+                    kaynak = name
+            kaynak_etiketle(service, msg['id'], kaynak)
             subject = next((h['value'] for h in headers if h['name'] == 'Subject'), "Konu Yok")
             sender = next((h['value'] for h in headers if h['name'] == 'From'), "Bilinmiyor")
             msg_id = msg['id']
@@ -420,13 +466,14 @@ def mailleri_getir(service):
             final_text = temiz_body.replace("\r", "").replace("\n", " ")[:12000]
             analiz_listesi.append({
                 "message_id": msg_id, "gonderen": sender,
-                "konu": subject, "icerik": final_text
+                "konu": subject, "icerik": final_text, "kaynak": kaynak
             })
         except Exception as e:
             hata_kaydet("Mail okuma")
             print(f"Mail okuma hatası: {e}")
             continue
 
+    analiz_listesi.sort(key=lambda m: {'Substack': 0, 'Seeking Alpha': 1}.get(m['kaynak'], 2))
     print(f"AI'ya: {len(analiz_listesi)} | Banka/yasaklı: {len(banka_listesi)}")
     return analiz_listesi, banka_listesi
 
@@ -634,15 +681,20 @@ def html_analiz_karti(karar, ticker_grafik_var=False, portfolio_mi=False):
                 "#c0392b" if etki.lower() == "negatif" else "#7f8c8d")
 
     badges = ""
+    kaynak = karar.get('kaynak', 'Diğer')
+    if kaynak in KAYNAK_ETIKETLERI:
+        renk = KAYNAK_ETIKETLERI[kaynak]['renk']
+        yazi = KAYNAK_ETIKETLERI[kaynak].get('yazi', '#ffffff')
+        badges += f'<span style="background:{renk};color:{yazi};padding:3px 8px;border-radius:4px;">{kaynak}</span>'
     if isinstance(onem, (int, float)) and onem >= ACIL_UYARI_ESIK:
         badges += (
             '<span style="background:#c0392b;color:white;padding:3px 8px;'
-            'border-radius:4px;font-size:11px;margin-left:5px;">⭐ YÜKSEK</span>'
+            'border-radius:4px;font-size:11px;margin-left:5px;">YÜKSEK</span>'
         )
     if portfolio_mi:
         badges += (
             '<span style="background:#8e44ad;color:white;padding:3px 8px;'
-            'border-radius:4px;font-size:11px;margin-left:5px;">⭐ PORTFOLIO</span>'
+            'border-radius:4px;font-size:11px;margin-left:5px;">PORTFOLIO</span>'
         )
 
     grafik_info = '<span style="color:#27ae60;font-size:11px;">📈 Grafik altta</span>' if ticker_grafik_var else ''
@@ -793,6 +845,52 @@ def listeyi_bol(liste, parca_boyutu):
         yield liste[i:i + parca_boyutu]
 
 
+def sorgu_idleri(service, query):
+    ids = []
+    token = None
+    while True:
+        params = dict(userId='me', q=query, maxResults=500)
+        if token:
+            params['pageToken'] = token
+        response = service.users().messages().list(**params).execute()
+        ids.extend(m['id'] for m in response.get('messages', []))
+        token = response.get('nextPageToken')
+        if not token:
+            return ids
+
+
+def etiket_duzenini_uygula(service):
+    sonuc = []
+    for kaynak, domain in [('Substack', 'substack.com'), ('Seeking Alpha', 'seekingalpha.com')]:
+        query = f'{{from:{domain} list:{domain}}} -in:spam -in:trash'
+        ids = sorgu_idleri(service, query)
+        label_id = LABEL_CACHE[KAYNAK_ETIKETLERI[kaynak]['ad']]
+        add = [label_id] + (['STARRED'] if kaynak == 'Substack' else [])
+        for chunk in listeyi_bol(ids, 1000):
+            service.users().messages().batchModify(userId='me',
+                body={'ids': chunk, 'addLabelIds': add}).execute()
+        print(f'✓ {kaynak}: {len(ids)} mail kaynak etiketiyle düzenlendi.')
+        sonuc.append(f'- {kaynak}: {len(ids)} mail')
+
+    # Previously broad score>=7 is not a reliable important-development signal.
+    label_id = LABEL_CACHE[AKSIYON_ETIKETLERI['YUKSEK_ONEM']['ad']]
+    ids = sorgu_idleri(service, f'label:"{AKSIYON_ETIKETLERI["YUKSEK_ONEM"]["ad"]}"')
+    for chunk in listeyi_bol(ids, 1000):
+        service.users().messages().batchModify(userId='me',
+            body={'ids': chunk, 'removeLabelIds': [label_id]}).execute()
+    sonuc.append(f'- Eski geniş kapsamlı önem işareti kaldırıldı: {len(ids)}')
+    genel = KONU_ETIKETLERI['07-Genel-Piyasa']['ad']
+    other = ' '.join(f'label:"{e["ad"]}"' for key, e in KONU_ETIKETLERI.items()
+                     if key != '07-Genel-Piyasa')
+    ids = sorgu_idleri(service, f'label:"{genel}" {{{other}}}')
+    for chunk in listeyi_bol(ids, 1000):
+        service.users().messages().batchModify(userId='me',
+            body={'ids': chunk, 'removeLabelIds': [LABEL_CACHE[genel]]}).execute()
+    sonuc.append(f'- Konusu belirliyken eklenmiş genel piyasa etiketi temizlendi: {len(ids)}')
+    with open('run-summary.md', 'w', encoding='utf-8') as out:
+        out.write('## Kaynak ve renk düzeni\n' + '\n'.join(sonuc) + '\n- Sonuç: BAŞARILI\n')
+
+
 # ================= MAIN =================
 
 if __name__ == '__main__':
@@ -813,7 +911,12 @@ if __name__ == '__main__':
         exit(1)
 
     print("\n=== Etiketler Hazırlanıyor ===")
-    etiketleri_olustur_veya_getir(service)
+    if not etiketleri_olustur_veya_getir(service):
+        calisma_ozeti_yaz()
+        exit(1)
+    if os.environ.get('MAIL_MODE') == 'labels':
+        etiket_duzenini_uygula(service)
+        exit(0)
 
     print("\n=== Mailler Çekiliyor ===")
     analiz_mailleri, banka_mailleri = mailleri_getir(service)
@@ -840,7 +943,7 @@ if __name__ == '__main__':
         f"📧 {toplam_mail} mail / {toplam_paket} paket\n"
         f"⊘ Banka: {len(banka_mailleri)} (etiketlendi)\n"
         f"🤖 Model: {MODEL_ZINCIRI[0].split('/')[-1]} (5 yedek)\n"
-        f"⭐ Watchlist: {len(WATCHLIST)} hisse"
+        f"Watchlist: {len(WATCHLIST)} hisse"
     )
 
     # Sonuç biriktirme
@@ -870,6 +973,7 @@ if __name__ == '__main__':
                     continue
 
                 ilgili_mail = paket[mail_no - 1]
+                karar['kaynak'] = ilgili_mail['kaynak']
                 msg_id = ilgili_mail['message_id']
                 konu_kat = karar.get('konu_kategorisi', '07-Genel-Piyasa')
                 aksiyon = karar.get('aksiyon', 'ele')
@@ -886,7 +990,8 @@ if __name__ == '__main__':
                     if not tum_tickerlar and karar.get('ticker'):
                         tum_tickerlar = [karar['ticker']]
 
-                    is_portfolio, matched = watchlist_kontrol(tum_tickerlar)
+                    # A passing mention in a large newsletter is not a portfolio story.
+                    is_portfolio, matched = watchlist_kontrol([karar.get('ticker', '')])
                     karar['_portfolio'] = is_portfolio
                     karar['_watchlist_matches'] = matched
 
@@ -986,7 +1091,7 @@ if __name__ == '__main__':
         </h2>
         <div style="background:#ecf0f1;padding:12px;border-radius:6px;margin-bottom:20px;">
             <strong>Özet:</strong>
-            ⭐ {yuksek_sayi} yüksek önem &nbsp;|&nbsp;
+            {yuksek_sayi} yüksek önem &nbsp;|&nbsp;
             💼 {portfolio_sayi} portfolio &nbsp;|&nbsp;
             ✓ {analiz_sayi} analiz &nbsp;|&nbsp;
             ⊘ {elenen_sayi} elenen &nbsp;|&nbsp;
@@ -1009,7 +1114,7 @@ if __name__ == '__main__':
     # BÖLÜM 2: Yüksek önemli (portfolio dışı)
     yuksek_non_portfolio = [k for k in yuksek_onem_kararlari if not k.get('_portfolio')]
     if yuksek_non_portfolio:
-        html += '<hr><h2 style="color:#c0392b;">⭐ Bölüm 2: Yüksek Önemli (Portfolio Dışı)</h2>'
+        html += '<hr><h2 style="color:#c0392b;">Bölüm 2: Yüksek Önemli (Portfolio Dışı)</h2>'
         for karar in sorted(yuksek_non_portfolio, key=lambda x: x.get('onem_skoru', 0), reverse=True):
             ticker = karar.get('ticker', '')
             html += html_analiz_karti(karar, ticker in grafikli_tickerlar)
@@ -1058,13 +1163,13 @@ if __name__ == '__main__':
 
     html += '</div>'
 
-    baslik = f"📊 Berkonomi {bugun} - {analiz_sayi} analiz, {yuksek_sayi}⭐, {portfolio_sayi}💼"
+    baslik = f"📊 Berkonomi {bugun} - {analiz_sayi} analiz, {yuksek_sayi} önemli, {portfolio_sayi}💼"
     mail_gonder_resimli(service, hedef_mail, baslik, html, grafikler)
 
     # Telegram final özet
     telegram_gonder(
         f"✅ <b>Analiz Bitti</b>\n\n"
-        f"⭐ Yüksek önem: {yuksek_sayi}\n"
+        f"Yüksek önem: {yuksek_sayi}\n"
         f"💼 Portfolio: {portfolio_sayi}\n"
         f"✓ Toplam analiz: {analiz_sayi}\n"
         f"⊘ Elenen: {elenen_sayi}\n"
@@ -1086,7 +1191,7 @@ if __name__ == '__main__':
         etki = karar.get('etki', '')
         is_portfolio = karar.get('_portfolio')
 
-        prefix = "💼 PORTFOLIO" if is_portfolio else "⭐ YÜKSEK"
+        prefix = "💼 PORTFOLIO" if is_portfolio else "YÜKSEK"
         etki_emoji = "🟢" if etki.lower() == "pozitif" else ("🔴" if etki.lower() == "negatif" else "⚪")
 
         telegram_gonder(
