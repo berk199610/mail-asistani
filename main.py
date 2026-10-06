@@ -361,8 +361,17 @@ def yasakli_mi(gonderen):
 
 def mailleri_getir(service):
     print(f"Mail sorgusu: {GMAIL_QUERY}")
-    results = service.users().messages().list(userId='me', q=GMAIL_QUERY, maxResults=150).execute()
-    messages = results.get('messages', [])
+    messages = []
+    page_token = None
+    while True:
+        params = dict(userId='me', q=GMAIL_QUERY, maxResults=150)
+        if page_token:
+            params['pageToken'] = page_token
+        results = service.users().messages().list(**params).execute()
+        messages.extend(results.get('messages', []))
+        page_token = results.get('nextPageToken')
+        if not page_token:
+            break
 
     analiz_listesi = []
     banka_listesi = []
