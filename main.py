@@ -95,6 +95,23 @@ AKSIYON_ETIKETLERI = {
 }
 
 LABEL_CACHE = {}
+CALISMA_HATALARI = Counter()
+
+
+def hata_kaydet(adim):
+    CALISMA_HATALARI[adim] += 1
+
+
+def calisma_ozeti_yaz(analiz=0, elenen=0, banka=0, basarisiz=0):
+    # Public repository: only counts/status, never mail contents or recipients.
+    satirlar = ["## Mail Asistanı", f"- Analiz: {analiz}",
+                f"- Elenen: {elenen}", f"- Banka: {banka}",
+                f"- Başarısız paket: {basarisiz}"]
+    for adim, sayi in sorted(CALISMA_HATALARI.items()):
+        satirlar.append(f"- Hata ({adim}): {sayi}")
+    satirlar.append("- Sonuç: " + ("HATA" if basarisiz or CALISMA_HATALARI else "BAŞARILI"))
+    with open("run-summary.md", "w", encoding="utf-8") as dosya:
+        dosya.write("\n".join(satirlar) + "\n")
 
 
 # ================= PROMPT =================
@@ -173,6 +190,7 @@ def telegram_gonder(mesaj, acil=False, parse_mode="HTML"):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
+        hata_kaydet("Telegram ayarı")
         return False
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -188,10 +206,14 @@ def telegram_gonder(mesaj, acil=False, parse_mode="HTML"):
         encoded = urllib.parse.urlencode(data).encode('utf-8')
         req = urllib.request.Request(url, data=encoded, method='POST')
         with urllib.request.urlopen(req, timeout=10) as response:
-            response.read()
+            sonuc = json.loads(response.read())
+            if not sonuc.get("ok"):
+                raise ValueError("Telegram yanıtı başarısız")
+        print("✓ Telegram mesajı teslim edildi.")
         return True
     except Exception as e:
-        print(f"Telegram hatası: {e}")
+        hata_kaydet("Telegram gönderimi")
+        print(f"Telegram hatası: {type(e).__name__} (HTTP {getattr(e, 'code', '-')})")
         return False
 
 
@@ -222,11 +244,13 @@ def etiketleri_olustur_veya_getir(service):
                     LABEL_CACHE[ad] = yeni['id']
                     print(f"✓ Etiket oluşturuldu: {ad}")
                 except Exception as e:
+                    hata_kaydet("Etiket oluşturma")
                     print(f"❌ Etiket: '{ad}': {e}")
 
         print(f"Toplam {len(LABEL_CACHE)} etiket hazır.")
         return True
     except Exception as e:
+        hata_kaydet("Etiket sistemi")
         print(f"Etiket sistemi hatası: {e}")
         return False
 
@@ -244,6 +268,7 @@ def maile_etiket_ata(service, message_id, etiket_anahtarlari):
             label_ids.append(LABEL_CACHE[ad])
 
     if not label_ids:
+        hata_kaydet("Etiket bulunamadı")
         return False
     try:
         service.users().messages().modify(
@@ -252,6 +277,7 @@ def maile_etiket_ata(service, message_id, etiket_anahtarlari):
         ).execute()
         return True
     except Exception as e:
+        hata_kaydet("Etiket atama")
         print(f"Etiket atama hatası: {e}")
         return False
 
@@ -295,10 +321,14 @@ def giris_yap_ve_sheets():
 
         sheet = None
         try:
-            if "SHEET_ID" in os.environ:
+            if os.environ.get("SHEET_ID"):
                 gc = gspread.authorize(creds)
                 sheet = gc.open_by_key(os.environ["SHEET_ID"]).sheet1
+                print("✓ Google Sheets bağlantısı doğrulandı.")
+            else:
+                hata_kaydet("Sheets ayarı")
         except Exception as e:
+            hata_kaydet("Sheets bağlantısı")
             print(f"Sheets bağlantı hatası: {e}")
 
         return gmail_service, sheet
@@ -384,6 +414,7 @@ def mailleri_getir(service):
                 "konu": subject, "icerik": final_text
             })
         except Exception as e:
+            hata_kaydet("Mail okuma")
             print(f"Mail okuma hatası: {e}")
             continue
 
@@ -718,8 +749,11 @@ def mail_gonder_resimli(service, kime, konu, html_content, grafik_buffers):
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         service.users().messages().send(userId="me", body={'raw': raw}).execute()
         print(f"Mail: {konu}")
+        return True
     except Exception as e:
+        hata_kaydet("Mail gönderimi")
         print(f"Mail hatası: {e}")
+        return False
 
 
 def listeyi_bol(liste, parca_boyutu):
@@ -742,6 +776,8 @@ if __name__ == '__main__':
 
     if not service:
         telegram_gonder("⛔ Gmail bağlantısı kurulamadı.", acil=True)
+        hata_kaydet("Gmail bağlantısı")
+        calisma_ozeti_yaz()
         exit(1)
 
     print("\n=== Etiketler Hazırlanıyor ===")
@@ -760,7 +796,8 @@ if __name__ == '__main__':
         telegram_gonder(
             f"ℹ️ Analiz edilecek mail yok.\n({len(banka_mailleri)} banka mail etiketlendi.)"
         )
-        exit(0)
+        calisma_ozeti_yaz(banka=len(banka_mailleri))
+        exit(1 if CALISMA_HATALARI else 0)
 
     paketler = list(listeyi_bol(analiz_mailleri, HER_MESAJDAKI_MAIL_SAYISI))
     toplam_paket = len(paketler)
@@ -858,6 +895,7 @@ if __name__ == '__main__':
                     tum_elenen_kararlari.append(karar)
 
             except Exception as e:
+                hata_kaydet("Karar işleme")
                 print(f"Karar işleme: {e}")
                 continue
 
@@ -874,6 +912,7 @@ if __name__ == '__main__':
             sheet.append_rows(sheets_satirlari)
             print(f"\n✓ Sheets: {len(sheets_satirlari)} satır")
         except Exception as e:
+            hata_kaydet("Sheets yazma")
             print(f"Sheets hatası: {e}")
 
     # Grafikler (yüksek önemli + portfolio)
@@ -1027,4 +1066,8 @@ if __name__ == '__main__':
         )
         time.sleep(0.5)
 
+    calisma_ozeti_yaz(analiz_sayi, elenen_sayi, banka_sayi, basarisiz_paket)
+    if basarisiz_paket or CALISMA_HATALARI:
+        print("\n❌ Çalışma eksik/hatalı. GitHub çalışma özetini kontrol edin.")
+        exit(1)
     print("\n✓ V6.0 Bitti.")
