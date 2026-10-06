@@ -55,8 +55,8 @@ WATCHLIST = [
 ]
 
 # --- DİĞER AYARLAR ---
-HER_MESAJDAKI_MAIL_SAYISI = 12   # Daha büyük paket = daha az API isteği
-BEKLEME_SURESI_SANIYE = 25
+HER_MESAJDAKI_MAIL_SAYISI = 6    # Uzun analiz yanıtlarının kesilmesini azaltır.
+BEKLEME_SURESI_SANIYE = 10
 
 MAX_RETRY = 5
 ILK_BEKLEME = 20
@@ -437,7 +437,7 @@ def _gemini_istek_yap(model_adi, prompt, api_key, timeout=180):
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.3, "topP": 0.95, "topK": 40,
-            "maxOutputTokens": 8192,
+            "maxOutputTokens": 32768,
             "responseMimeType": "application/json"
         },
         "safetySettings": [
@@ -465,7 +465,31 @@ def _gemini_istek_yap(model_adi, prompt, api_key, timeout=180):
         finish = cand.get('finishReason', 'BILINMEYEN')
         raise ValueError(f"AI içerik üretmedi (finishReason={finish})")
 
-    return cand['content']['parts'][0]['text']
+    if cand.get('finishReason') != 'STOP':
+        raise ValueError(f"AI yanıtı tamamlanmadı (finishReason={cand.get('finishReason')})")
+    return ''.join(part.get('text', '') for part in cand['content']['parts']
+                   if not part.get('thought'))
+
+
+def kararlar_dogrula(kararlar, mail_sayisi):
+    if not isinstance(kararlar, list) or len(kararlar) != mail_sayisi:
+        raise ValueError("AI her mail için bir karar döndürmedi")
+    numaralar = []
+    for karar in kararlar:
+        if not isinstance(karar, dict):
+            raise ValueError("AI kararı nesne değil")
+        no = karar.get('mail_no')
+        if type(no) is not int or karar.get('aksiyon') not in ('analiz', 'ele'):
+            raise ValueError("AI kararının numarası veya aksiyonu geçersiz")
+        for alan in ('ticker', 'sirket', 'konu', 'etki', 'ozet', 'yorum', 'risk'):
+            if alan in karar and not isinstance(karar[alan], str):
+                raise ValueError(f"AI kararındaki {alan} metin değil")
+        if 'tum_tickerlar' in karar and not isinstance(karar['tum_tickerlar'], list):
+            raise ValueError("AI ticker listesi geçersiz")
+        numaralar.append(no)
+    if sorted(numaralar) != list(range(1, mail_sayisi + 1)):
+        raise ValueError("AI kararlarında atlanan veya tekrarlanan mail var")
+    return kararlar
 
 
 def ai_ile_analiz_et(mail_paketi):
@@ -510,8 +534,7 @@ def ai_ile_analiz_et(mail_paketi):
                 temiz = re.sub(r'^```json\s*|```\s*$', '', ham_cevap.strip(), flags=re.MULTILINE)
                 temiz = temiz.strip()
                 kararlar = json.loads(temiz)
-                if not isinstance(kararlar, list):
-                    raise ValueError(f"AI list dönmedi: {type(kararlar)}")
+                kararlar_dogrula(kararlar, len(mail_paketi))
 
                 print(f"  ✓ Başarılı ({aktif_model})")
                 return kararlar
