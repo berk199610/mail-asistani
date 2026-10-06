@@ -9,6 +9,7 @@ import re
 import io
 import random
 from collections import Counter
+from email.utils import getaddresses, parseaddr
 import pandas as pd
 import yfinance as yf
 import gspread
@@ -98,6 +99,26 @@ KAYNAK_ETIKETLERI = {
     "Substack": {"ad": "01 · Substack", "renk": "#ff7537", "yazi": "#000000"},
     "Seeking Alpha": {"ad": "02 · Seeking Alpha", "renk": "#3c78d8"},
 }
+
+HESAP_ETIKETI = {'ad': '03 · Ahmetsavar', 'renk': '#b65775'}
+
+
+def yonlendirme_adresi():
+    adres = parseaddr(os.environ.get('HEDEF_MAIL', ''))[1].lower()
+    if '@' not in adres:
+        return ''
+    local, domain = adres.split('@', 1)
+    return local.split('+', 1)[0] + '+ahmetsavar@' + domain
+
+
+def hesap_tespit(headers, label_ids=()):
+    if LABEL_CACHE.get(HESAP_ETIKETI['ad']) in label_ids:
+        return 'Ahmetsavar'
+    hedef = yonlendirme_adresi()
+    adresler = getaddresses([h.get('value', '') for h in headers
+                            if h.get('name', '').lower() in
+                            ('to', 'cc', 'delivered-to', 'x-forwarded-to', 'x-original-to')])
+    return 'Ahmetsavar' if hedef and any(a.lower() == hedef for _, a in adresler) else 'Ana hesap'
 
 
 def kaynak_tespit(headers):
@@ -257,7 +278,7 @@ def etiketleri_olustur_veya_getir(service):
         mevcut_map = {lbl['name']: lbl['id'] for lbl in mevcut}
 
         tum_etiketler = (list(KONU_ETIKETLERI.values()) + list(AKSIYON_ETIKETLERI.values())
-                        + list(KAYNAK_ETIKETLERI.values()))
+                        + list(KAYNAK_ETIKETLERI.values()) + [HESAP_ETIKETI])
 
         for etiket in tum_etiketler:
             ad = etiket['ad']
@@ -272,7 +293,7 @@ def etiketleri_olustur_veya_getir(service):
             else:
                 yeni = service.users().labels().create(userId='me', body=body).execute()
             LABEL_CACHE[ad] = yeni['id']
-            if etiket not in KAYNAK_ETIKETLERI.values():
+            if etiket not in KAYNAK_ETIKETLERI.values() and etiket != HESAP_ETIKETI:
                 MANAGED_LABEL_IDS.update(mevcut_map[n] for n in aliases if n in mevcut_map)
                 MANAGED_LABEL_IDS.add(yeni['id'])
 
@@ -398,6 +419,9 @@ def mailleri_getir(service):
                for e in KAYNAK_ETIKETLERI.values()] + [GMAIL_QUERY]
     queries += ['newer_than:1d {from:substack.com list:substack.com} -in:spam -in:trash',
                 'newer_than:1d {from:seekingalpha.com list:seekingalpha.com} -in:spam -in:trash']
+    queries.append(f'newer_than:1d label:"{HESAP_ETIKETI["ad"]}" -in:spam -in:trash')
+    if yonlendirme_adresi():
+        queries.append(f'newer_than:1d deliveredto:{yonlendirme_adresi()} -in:spam -in:trash')
     for query in queries:
         page_token = None
         while True:
@@ -425,6 +449,10 @@ def mailleri_getir(service):
         try:
             txt = service.users().messages().get(userId='me', id=msg['id']).execute()
             headers = txt['payload']['headers']
+            hesap = hesap_tespit(headers, txt.get('labelIds', []))
+            if hesap == 'Ahmetsavar':
+                service.users().messages().modify(userId='me', id=msg['id'],
+                    body={'addLabelIds': [LABEL_CACHE[HESAP_ETIKETI['ad']]]}).execute()
             kaynak = kaynak_tespit(headers)
             # Already-labelled custom-domain publisher mail is also recognised.
             for name, label in KAYNAK_ETIKETLERI.items():
@@ -436,7 +464,7 @@ def mailleri_getir(service):
             msg_id = msg['id']
 
             if yasakli_mi(sender):
-                banka_listesi.append({"message_id": msg_id, "gonderen": sender, "konu": subject})
+                banka_listesi.append({"message_id": msg_id, "gonderen": sender, "konu": subject, "hesap": hesap})
                 continue
 
             body = ""
@@ -466,7 +494,7 @@ def mailleri_getir(service):
             final_text = temiz_body.replace("\r", "").replace("\n", " ")[:12000]
             analiz_listesi.append({
                 "message_id": msg_id, "gonderen": sender,
-                "konu": subject, "icerik": final_text, "kaynak": kaynak
+                "konu": subject, "icerik": final_text, "kaynak": kaynak, "hesap": hesap
             })
         except Exception as e:
             hata_kaydet("Mail okuma")
@@ -681,6 +709,8 @@ def html_analiz_karti(karar, ticker_grafik_var=False, portfolio_mi=False):
                 "#c0392b" if etki.lower() == "negatif" else "#7f8c8d")
 
     badges = ""
+    if karar.get('hesap') == 'Ahmetsavar':
+        badges += '<span style="background:#b65775;color:white;padding:3px 8px;border-radius:4px;">Ahmetsavar hesabı</span>'
     kaynak = karar.get('kaynak', 'Diğer')
     if kaynak in KAYNAK_ETIKETLERI:
         renk = KAYNAK_ETIKETLERI[kaynak]['renk']
@@ -917,6 +947,14 @@ if __name__ == '__main__':
     if os.environ.get('MAIL_MODE') == 'labels':
         etiket_duzenini_uygula(service)
         exit(0)
+    if os.environ.get('MAIL_MODE') == 'accounts':
+        ids = sorgu_idleri(service, f'deliveredto:{yonlendirme_adresi()} -in:spam -in:trash')
+        for chunk in listeyi_bol(ids, 1000):
+            service.users().messages().batchModify(userId='me', body={
+                'ids': chunk, 'addLabelIds': [LABEL_CACHE[HESAP_ETIKETI['ad']]]}).execute()
+        with open('run-summary.md', 'w', encoding='utf-8') as out:
+            out.write(f'## İkinci hesap kurulumu\n- Ahmetsavar etiketi: {len(ids)} mail\n- Sonuç: BAŞARILI\n')
+        exit(0)
 
     print("\n=== Mailler Çekiliyor ===")
     analiz_mailleri, banka_mailleri = mailleri_getir(service)
@@ -974,6 +1012,7 @@ if __name__ == '__main__':
 
                 ilgili_mail = paket[mail_no - 1]
                 karar['kaynak'] = ilgili_mail['kaynak']
+                karar['hesap'] = ilgili_mail.get('hesap', 'Ana hesap')
                 msg_id = ilgili_mail['message_id']
                 konu_kat = karar.get('konu_kategorisi', '07-Genel-Piyasa')
                 aksiyon = karar.get('aksiyon', 'ele')
@@ -1021,7 +1060,9 @@ if __name__ == '__main__':
                         karar.get('konu', ''),
                         karar.get('etki', ''),
                         onem,
-                        "PORTFOLIO" if is_portfolio else ""
+                        "PORTFOLIO" if is_portfolio else "",
+                        karar['hesap'],
+                        karar['kaynak']
                     ])
 
                 else:
@@ -1046,6 +1087,11 @@ if __name__ == '__main__':
     # Sheets
     if sheet and sheets_satirlari:
         try:
+            if sheet.col_count < 10:
+                sheet.add_cols(10 - sheet.col_count)
+            account_headers = sheet.get('I1:J1')
+            if not any(account_headers[0] if account_headers else []):
+                sheet.update(range_name='I1:J1', values=[['Geldiği hesap', 'Yayın kaynağı']])
             sheet.append_rows(sheets_satirlari)
             print(f"\n✓ Sheets: {len(sheets_satirlari)} satır")
         except Exception as e:
@@ -1101,6 +1147,19 @@ if __name__ == '__main__':
     """
 
     # BÖLÜM 0: Ticker frekans
+    ikinci_analiz = [k for k in tum_analiz_kararlari if k.get('hesap') == 'Ahmetsavar']
+    ikinci_elenen = [k for k in tum_elenen_kararlari if k.get('hesap') == 'Ahmetsavar']
+    ikinci_banka = [m for m in banka_mailleri if m.get('hesap') == 'Ahmetsavar']
+    if ikinci_analiz or ikinci_elenen or ikinci_banka:
+        html += '<hr><h2 style="color:#b65775;">Ahmetsavar hesabından gelenler</h2>'
+        html += f'<p>{len(ikinci_analiz)} analiz · {len(ikinci_elenen)} elenen · {len(ikinci_banka)} banka</p>'
+        for karar in ikinci_analiz:
+            html += html_analiz_karti(karar, portfolio_mi=karar.get('_portfolio', False))
+        if ikinci_elenen or ikinci_banka:
+            html += '<h3>İncelenip elenenler</h3><table>'
+            html += ''.join(html_elenen_satiri(k) for k in ikinci_elenen)
+            html += ''.join(html_elenen_banka_satiri(m) for m in ikinci_banka)
+            html += '</table>'
     html += html_ticker_frekans_tablosu(dict(ticker_frekans), watchlist_set)
 
     # BÖLÜM 1: Portfolio haberleri (watchlist match)
@@ -1172,6 +1231,7 @@ if __name__ == '__main__':
         f"Yüksek önem: {yuksek_sayi}\n"
         f"💼 Portfolio: {portfolio_sayi}\n"
         f"✓ Toplam analiz: {analiz_sayi}\n"
+        f"Ahmetsavar: {len(ikinci_analiz)} analiz, {len(ikinci_elenen)} elenen, {len(ikinci_banka)} banka\n"
         f"⊘ Elenen: {elenen_sayi}\n"
         f"🏦 Banka: {banka_sayi}\n"
         f"❌ Başarısız: {basarisiz_paket}\n"
@@ -1198,6 +1258,7 @@ if __name__ == '__main__':
             f"{prefix} ({skor}/10)\n\n"
             f"{etki_emoji} <b>{ticker}</b> — {sirket}\n"
             f"📰 {konu}\n\n"
+            f"Hesap: {karar.get('hesap', 'Ana hesap')} · Kaynak: {karar.get('kaynak', 'Diğer')}\n"
             f"📊 Detay mailde.",
             acil=True
         )

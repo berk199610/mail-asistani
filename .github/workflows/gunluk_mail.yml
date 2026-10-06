@@ -12,6 +12,7 @@ on:
         options:
           - analyze
           - labels
+          - accounts
 
 concurrency:
   group: gunluk-mail-analizi
