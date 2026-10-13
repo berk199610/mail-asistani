@@ -1,0 +1,55 @@
+name: Bilanco Hatirlatmalari
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Türkiye 09.00 / Vietnam 13.00; GitHub gecikmeleri mümkün.
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Normal kontrol, ilk haftalık bildirim veya gönderimsiz kontrol'
+        type: choice
+        default: normal
+        options:
+          - normal
+          - initial
+          - dry-run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bilanco-hatirlatmalari
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Kutuphaneler
+        run: pip install requests beautifulsoup4 google-auth tzdata
+      - name: Bilanco kontrolu
+        env:
+          EARNINGS_CONFIG_JSON: ${{ secrets.EARNINGS_CONFIG_JSON }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EARNINGS_MODE: ${{ inputs.mode || 'normal' }}
+        run: |
+          case "$EARNINGS_MODE" in
+            initial) python -u earnings_reminders.py --initial ;;
+            dry-run) python -u earnings_reminders.py --dry-run ;;
+            *) python -u earnings_reminders.py ;;
+          esac
+      - name: Ozet
+        if: always()
+        run: |
+          if [ -f earnings-run-summary.md ]; then
+            cat earnings-run-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
